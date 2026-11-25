@@ -49,6 +49,14 @@ type App struct {
 	Policy       map[string]any    `json:"policy,omitempty" yaml:"policy"`
 	Availability map[string]string `json:"availability" yaml:"availability"`
 	Capabilities Capabilities      `json:"capabilities" yaml:"capabilities"`
+	// Owner records which app and conversation registered this app, so
+	// archived registrations can be found and restored from that context.
+	Owner *Owner `json:"owner,omitempty" yaml:"owner"`
+}
+
+type Owner struct {
+	Plugin       string `json:"plugin" yaml:"plugin"`
+	Conversation string `json:"conversation,omitempty" yaml:"conversation"`
 }
 
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)

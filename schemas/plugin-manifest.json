@@ -25,6 +25,16 @@
     "parser": {"type": "string", "maxLength": 40},
     "policy": {"type": "object"},
     "availability": {"type": "object", "additionalProperties": {"type": "string"}},
+    "owner": {
+      "description": "The app and conversation that registered this app at runtime. Used to group archived registrations for restore.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugin"],
+      "properties": {
+        "plugin": {"$ref": "#/$defs/id"},
+        "conversation": {"type": "string", "pattern": "^[a-zA-Z0-9_.-]{1,64}$"}
+      }
+    },
     "capabilities": {
       "description": "Host effects the app needs. Declaring any of them makes a runtime registration pending until it is confirmed on the device.",
       "type": "object",

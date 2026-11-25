@@ -8,7 +8,9 @@ import (
 	"github.com/flipperdevices/flipctl/internal/plugin"
 	"github.com/flipperdevices/flipctl/internal/runner"
 	"github.com/flipperdevices/flipctl/internal/viewdoc"
+	"github.com/flipperdevices/flipctl/schemas"
 	"gopkg.in/yaml.v3"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +24,15 @@ import (
 )
 
 type Server struct {
-	Apps          []plugin.App
+	registry      *plugin.Registry
+	opts          Options
+	pending       map[string]*Pending
+	cancelReasons map[string]string
+	limiter       *rateLimiter
+	viewJobs      map[string]string
+	liveOutput    map[string]*strings.Builder
+	notes         map[string]assistantNote
+	asking        map[string]bool
 	mu            sync.Mutex
 	next          int
 	jobs          map[string]Job
@@ -35,9 +45,14 @@ type Server struct {
 	firstEventID  int
 }
 type Job struct {
-	ID        string        `json:"id"`
-	JobID     string        `json:"jobId"`
-	AppID     string        `json:"appId"`
+	ID    string `json:"id"`
+	JobID string `json:"jobId"`
+	AppID string `json:"appId"`
+	// PluginVersion is the app version the job was started with. Replacing
+	// the app does not affect running jobs.
+	PluginVersion string `json:"pluginVersion,omitempty"`
+	// ViewAppID is set when a ViewApp action started the job.
+	ViewAppID string        `json:"viewAppId,omitempty"`
 	SessionID string        `json:"sessionId,omitempty"`
 	State     string        `json:"state"`
 	Result    runner.Result `json:"result"`
@@ -53,16 +68,17 @@ type Session struct {
 }
 
 type Event struct {
-	ID        int    `json:"id"`
-	Type      string `json:"type"`
-	Job       *Job   `json:"job,omitempty"`
-	Stream    string `json:"stream,omitempty"`
-	Data      string `json:"data,omitempty"`
-	Progress  any    `json:"progress,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
-	Revision  int    `json:"revision,omitempty"`
-	Reset     bool   `json:"reset,omitempty"`
-	Time      string `json:"time"`
+	ID        int             `json:"id"`
+	Type      string          `json:"type"`
+	Job       *Job            `json:"job,omitempty"`
+	Stream    string          `json:"stream,omitempty"`
+	Data      string          `json:"data,omitempty"`
+	Progress  any             `json:"progress,omitempty"`
+	SessionID string          `json:"sessionId,omitempty"`
+	Revision  int             `json:"revision,omitempty"`
+	Reset     bool            `json:"reset,omitempty"`
+	Registry  *RegistryChange `json:"registry,omitempty"`
+	Time      string          `json:"time"`
 }
 type apiError struct {
 	Error struct {
@@ -72,28 +88,49 @@ type apiError struct {
 	} `json:"error"`
 }
 
+// New serves a fixed catalog of system apps with no registration API.
 func New(apps []plugin.App, static http.Handler) *Server {
-	return &Server{Apps: apps, jobs: map[string]Job{}, cancels: map[string]context.CancelFunc{}, subs: map[chan Event]struct{}{}, static: static, sessionsStore: map[string]*Session{}, firstEventID: 1}
+	return NewWithOptions(plugin.NewRegistry(plugin.SystemEntries(apps, "catalog")), Options{Static: static})
 }
+
+// NewWithOptions serves apps from registry, which may change at runtime.
+func NewWithOptions(registry *plugin.Registry, opts Options) *Server {
+	return &Server{registry: registry, opts: opts, limiter: newRateLimiter(opts.JobRate, opts.JobBurst), pending: map[string]*Pending{}, cancelReasons: map[string]string{}, viewJobs: map[string]string{}, liveOutput: map[string]*strings.Builder{}, notes: map[string]assistantNote{}, asking: map[string]bool{}, jobs: map[string]Job{}, cancels: map[string]context.CancelFunc{}, subs: map[chan Event]struct{}{}, static: opts.Static, sessionsStore: map[string]*Session{}, firstEventID: 1}
+}
+
+// Registry exposes the live registry (for the daemon and tests).
+func (s *Server) Registry() *plugin.Registry { return s.registry }
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	m.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		j(w, map[string]any{"ready": len(s.Apps) > 0, "apps": len(s.Apps)})
+		n := len(s.registry.Snapshot().Entries)
+		j(w, map[string]any{"ready": n > 0, "apps": n})
 	})
 	m.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		n := len(s.jobs)
 		s.mu.Unlock()
-		fmt.Fprintf(w, "flipctl_apps %d\nflipctl_jobs %d\n", len(s.Apps), n)
+		snap := s.registry.Snapshot()
+		fmt.Fprintf(w, "flipctl_apps %d\nflipctl_jobs %d\nflipctl_registry_version %d\n", len(snap.Entries), n, snap.Version)
 	})
 	m.HandleFunc("/api/v1/meta", func(w http.ResponseWriter, r *http.Request) {
 		j(w, map[string]any{"apiVersion": "flipctl/v1alpha1", "appId": "flipctl", "name": "FlipCTL", "time": time.Now().Format(time.RFC3339)})
 	})
 	m.HandleFunc("/api/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
-		j(w, map[string]any{"apiVersion": "flipctl/v1alpha1", "capabilities": []string{"apps", "sessions", "view-document", "actions", "jobs", "cancel", "sse-replay"}})
+		caps := []string{"apps", "sessions", "view-document", "actions", "jobs", "cancel", "sse-replay", "registry-events"}
+		if s.opts.Store != nil {
+			caps = append(caps, "plugin-registration")
+		}
+		j(w, map[string]any{"apiVersion": "flipctl/v1alpha1", "capabilities": caps})
 	})
-	m.HandleFunc("/api/v1/apps", func(w http.ResponseWriter, r *http.Request) { j(w, s.Apps) })
+	m.HandleFunc("/api/v1/apps", func(w http.ResponseWriter, r *http.Request) { j(w, s.registry.Snapshot().Apps()) })
+	m.HandleFunc("GET /api/v1/schema/plugin-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := fs.ReadFile(schemas.FS, "plugin-manifest.json")
+		w.Header().Set("Content-Type", "application/schema+json")
+		w.Write(b)
+	})
+	s.registrationRoutes(m)
 	m.HandleFunc("/api/v1/schema/view-document.json", func(w http.ResponseWriter, r *http.Request) { j(w, viewSchema()) })
 	m.HandleFunc("/api/v1/openapi.json", func(w http.ResponseWriter, r *http.Request) { j(w, openapi()) })
 	m.HandleFunc("/api/v1/schema", func(w http.ResponseWriter, r *http.Request) {
@@ -257,6 +294,32 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	if req.ActionID == "" {
 		req.ActionID = "job.start"
 	}
+	if canonicalSessionAction && strings.HasPrefix(req.ActionID, "device.") {
+		if crossOrigin(r) {
+			writeErr(w, http.StatusForbidden, "cross_origin", "device actions are refused from another origin", "actionId")
+			return
+		}
+		s.mu.Lock()
+		err := s.handleDeviceActionLocked(ss, req.ActionID, req.Params["pluginId"])
+		s.mu.Unlock()
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "device_action_failed", err.Error(), "actionId")
+			return
+		}
+		s.viewDoc(w, req.SessionID)
+		return
+	}
+	if canonicalSessionAction && strings.HasPrefix(req.ActionID, "view.") {
+		s.mu.Lock()
+		status, code, err := s.handleViewActionLocked(ss, strings.TrimPrefix(req.ActionID, "view."), req.Fields)
+		s.mu.Unlock()
+		if err != nil {
+			writeErr(w, status, code, err.Error(), "actionId")
+			return
+		}
+		s.viewDoc(w, req.SessionID)
+		return
+	}
 	if canonicalSessionAction {
 		s.mu.Lock()
 		handled := s.handleSessionActionLocked(ss, req.ActionID, req.AppID, req.Fields, req.JobID)
@@ -276,43 +339,54 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	if ss != nil && len(req.Fields) == 0 {
 		req.Fields = copyMap(ss.FormValues)
 	}
-	a, ok := plugin.ByID(s.Apps, req.AppID)
+	entry, ok := s.registry.Snapshot().ByID(req.AppID)
 	if !ok {
 		writeErr(w, 404, "app_not_found", "app not found", "appId")
 		return
 	}
+	a := entry.App
 	if _, e := runner.Build(a, req.Fields); e != nil {
 		writeErr(w, 400, "validation_failed", e.Error(), "fields")
 		return
 	}
+	if ok, wait := s.limiter.allow(a.ID); !ok {
+		secs := int(wait/time.Second) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		writeErrDetails(w, http.StatusTooManyRequests, "rate_limited", fmt.Sprintf("too many jobs for %s; retry in %ds", a.ID, secs), "appId", map[string]any{"retryAfterSeconds": secs})
+		return
+	}
 	s.mu.Lock()
-	s.next++
-	id := "j-" + strconv.Itoa(s.next)
-	ctx, cancel := context.WithCancel(context.Background())
-	now := time.Now().Format(time.RFC3339)
-	job := Job{ID: id, JobID: id, AppID: a.ID, SessionID: req.SessionID, State: "running", Created: now, Updated: now}
-	s.jobs[id] = job
-	s.cancels[id] = cancel
+	job := s.startJobLocked(entry, req.Fields, req.SessionID, "")
 	if ss != nil {
-		ss.SelectedJobID = id
+		ss.SelectedJobID = job.ID
 		ss.CurrentAppID = a.ID
 		ss.Revision++
 		s.viewChangedLocked(ss)
 	}
-	s.evLocked("job.started", &job, "", "")
 	s.mu.Unlock()
-	go s.runJob(ctx, id, a, req.Fields)
 	if canonicalSessionAction {
 		s.viewDoc(w, req.SessionID)
 		return
 	}
 	j(w, job)
 }
-func (s *Server) runJob(ctx context.Context, id string, a plugin.App, fields map[string]string) {
+func (s *Server) runJob(ctx context.Context, id string, entry plugin.Entry, fields map[string]string) {
+	a := entry.App
 	cb := func(stream, chunk string) {
 		s.mu.Lock()
 		job := s.jobs[id]
 		s.evLocked("job.output", &job, stream, chunk)
+		if stream == "stdout" && job.ViewAppID != "" {
+			b := s.liveOutput[id]
+			if b == nil {
+				b = &strings.Builder{}
+				s.liveOutput[id] = b
+			}
+			if b.Len() < 64000 {
+				b.WriteString(chunk)
+			}
+			s.touchViewJobLocked(job)
+		}
 		for _, line := range strings.Split(chunk, "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
@@ -323,7 +397,8 @@ func (s *Server) runJob(ctx context.Context, id string, a plugin.App, fields map
 		}
 		s.mu.Unlock()
 	}
-	res, err := runner.RunWithCallback(ctx, a, fields, cb)
+	sb, policy := s.runOptionsFor(entry)
+	res, err := runner.RunWithOptions(ctx, a, fields, cb, runner.Options{Sandbox: sb, Policy: policy})
 	res.Parsed = parsers.Parse(a.Command.Parser, res.Output)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -331,6 +406,10 @@ func (s *Server) runJob(ctx context.Context, id string, a plugin.App, fields map
 	job.Result = res
 	job.Updated = time.Now().Format(time.RFC3339)
 	delete(s.cancels, id)
+	if reason, ok := s.cancelReasons[id]; ok {
+		delete(s.cancelReasons, id)
+		job.Result.Error = "canceled: " + reason
+	}
 	if job.State == "canceled" || ctx.Err() == context.Canceled {
 		job.State = "canceled"
 	} else if err != nil {
@@ -339,6 +418,8 @@ func (s *Server) runJob(ctx context.Context, id string, a plugin.App, fields map
 		job.State = "done"
 	}
 	s.jobs[id] = job
+	delete(s.liveOutput, id)
+	s.touchViewJobLocked(job)
 	for _, ss := range s.sessionsStore {
 		if ss.SelectedJobID == id {
 			ss.Revision++
@@ -410,15 +491,14 @@ func (s *Server) projectLocked(ss *Session) viewdoc.Document {
 	if ss.CurrentAppID == "" || ss.CurrentAppID == "home" {
 		doc.ViewID = "home-app-list"
 		doc.Title = "FlipCTL Apps"
-		items := []viewdoc.ListItem{}
-		for _, a := range s.Apps {
-			items = append(items, viewdoc.ListItem{Label: a.Title, Value: a.ID, Description: a.Summary, Action: &viewdoc.Action{ID: "app.open", Label: "Open " + a.Title, Enabled: true, Params: map[string]string{"appId": a.ID}}})
-		}
-		doc.Blocks = []viewdoc.Block{{ID: "apps", Kind: "list", Title: "Apps", Items: items}}
-		doc.Actions = nil
+		doc.Blocks, doc.Actions = s.homeBlocksLocked()
 		return doc
 	}
-	a, ok := plugin.ByID(s.Apps, ss.CurrentAppID)
+	entry, ok := s.registry.Snapshot().ByID(ss.CurrentAppID)
+	a := entry.App
+	if ok && a.Kind == plugin.KindViewApp {
+		return s.projectViewAppLocked(ss, entry)
+	}
 	if !ok {
 		doc.ViewID = "app-not-found"
 		doc.Blocks = []viewdoc.Block{{ID: "missing", Kind: "notice", Severity: "error", Text: "app not found"}}
@@ -430,7 +510,11 @@ func (s *Server) projectLocked(ss *Session) viewdoc.Document {
 	for _, f := range a.Fields {
 		fields = append(fields, viewdoc.FormField{ID: f.ID, Label: f.Label, Type: f.Type, Default: firstNonEmpty(ss.FormValues[f.ID], f.Default), Required: f.Required, Validation: f.Pattern})
 	}
-	doc.Blocks = []viewdoc.Block{{ID: "summary", Kind: "notice", Severity: "info", Text: a.Summary}, {ID: "form", Kind: "form", Title: a.Title + " options", Fields: fields}}
+	doc.Blocks = []viewdoc.Block{{ID: "summary", Kind: "notice", Severity: "info", Text: a.Summary}}
+	if entry.Tier == plugin.TierEphemeral {
+		doc.Blocks = append(doc.Blocks, ephemeralNotice(entry))
+	}
+	doc.Blocks = append(doc.Blocks, viewdoc.Block{ID: "form", Kind: "form", Title: a.Title + " options", Fields: fields})
 	doc.Actions = []viewdoc.Action{{ID: "form.update", Label: "Update form", Enabled: true}, {ID: "job.start", Label: "Start job", Enabled: true, Role: "primary", Params: map[string]string{"appId": a.ID}}, {ID: "navigation.back", Label: "Back", Enabled: true}}
 	return doc
 }
@@ -633,6 +717,11 @@ func j(w http.ResponseWriter, v any) {
 }
 func cors(n http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Plugin registration is never offered to other origins.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/plugins") {
+			n.ServeHTTP(w, r)
+			return
+		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "content-type,last-event-id")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")

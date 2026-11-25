@@ -1,0 +1,12 @@
+# Optional: let bubblewrap create its sandbox inside the demo container.
+# Nested namespaces need these relaxations of the *container's* confinement
+# (SELinux labelling, masked /proc paths, seccomp). On a device, flipctld
+# runs on the host and needs none of this. Without this file the daemon falls
+# back to the unsandboxed runner and logs a warning for every job.
+services:
+  flipctld:
+    security_opt:
+      - label=disable
+      - systempaths=unconfined
+      - seccomp=unconfined
+      - apparmor=unconfined

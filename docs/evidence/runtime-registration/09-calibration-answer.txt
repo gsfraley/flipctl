@@ -1,0 +1,32 @@
+FlipCTL LoRa antenna calibration
+view=assistant.c-demo.lora-calibration-view revision=26 session=s-1
+Actions: Capture packets[view.capture] | Which reading was best?[view.advise] | Update form[form.update] | Back[navigation.back]
+
+notice summary
+info: Capture packets while you rotate the antenna, then ask which reading was best
+
+notice ephemeral-notice
+warning: Ephemeral app v0.1.0 registered at runtime (api:127.0.0.1 (confirmed on device) -> /tmp/flipctl-state/ephemeral/assistant.c-demo.lo
+
+form form — LoRa antenna calibration options
+• Packets per capture (int): 10
+
+key_value last-job — Last run
+• jobId: j-2
+• appId: field.lora-rx
+• state: done
+• records: 10
+
+table display-1 — Received packets (last 8 of 10)
+seq | rssi | snr | lat | lon
+3 | -77 | 6.5 | 46.94846 | 7.44767
+4 | -86 | 2 | 46.94858 | 7.44776
+5 | -95 | -2.5 | 46.9487 | 7.44785
+6 | -81 | 4.5 | 46.94882 | 7.44794
+7 | -90 | 0 | 46.94894 | 7.44803
+8 | -76 | 7 | 46.94906 | 7.44812
+9 | -85 | 2.5 | 46.94918 | 7.44821
+10 | -94 | -2 | 46.9493 | 7.4483
+
+notice assistant-reply — Scripted assistant
+info: Analyzed 10 records. Strongest packet: seq 8 at -76 dBm (SNR 7 dB) near 46.94906, 7.44812; rssi mean -85.7 (range -95 to -76); sf mean

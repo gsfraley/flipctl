@@ -194,8 +194,9 @@ func (m model) watchEvents() tea.Msg {
 				if e.ID > last {
 					last = e.ID
 				}
-				if e.Type == "events.reset" {
-					// Replay window no longer covers our position: resync from a snapshot.
+				if e.Type == "events.reset" || e.Type == "registry.changed" {
+					// A reset needs a snapshot resync; a registry change can
+					// add, replace or remove apps in the current view.
 					return sseChangedMsg{lastEventID: last}
 				}
 				if e.Type == "view.changed" && (m.sessionID == "" || e.SessionID == "" || e.SessionID == m.sessionID) {

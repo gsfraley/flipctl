@@ -3,7 +3,6 @@ package plugin
 import (
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -49,6 +48,18 @@ type App struct {
 	Parser       string            `json:"parser,omitempty" yaml:"parser"`
 	Policy       map[string]any    `json:"policy,omitempty" yaml:"policy"`
 	Availability map[string]string `json:"availability" yaml:"availability"`
+	Capabilities Capabilities      `json:"capabilities" yaml:"capabilities"`
+	// Owner records which app and conversation registered this app, so
+	// archived registrations can be found and restored from that context.
+	Owner *Owner `json:"owner,omitempty" yaml:"owner"`
+	// Actions and Display are only used by kind ViewApp.
+	Actions []ViewAction     `json:"actions,omitempty" yaml:"actions"`
+	Display []DisplayBinding `json:"display,omitempty" yaml:"display"`
+}
+
+type Owner struct {
+	Plugin       string `json:"plugin" yaml:"plugin"`
+	Conversation string `json:"conversation,omitempty" yaml:"conversation"`
 }
 
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
@@ -63,16 +74,9 @@ func LoadDir(dir string) ([]App, error) {
 		if e != nil {
 			return e
 		}
-		var a App
-		if e = yaml.Unmarshal(b, &a); e != nil {
-			return e
-		}
-		normalize(&a)
-		if e = Validate(a); e != nil {
+		a, e := Parse(b)
+		if e != nil {
 			return fmt.Errorf("%s: %w", p, e)
-		}
-		if a.Availability == nil {
-			a.Availability = map[string]string{"state": "available"}
 		}
 		out = append(out, a)
 		return nil
@@ -115,7 +119,10 @@ func Validate(a App) error {
 	if a.ID == "" || !safeID.MatchString(a.ID) {
 		return errors.New("invalid app id")
 	}
-	if a.Command.Executable == "" {
+	if err := validateViewApp(a); err != nil {
+		return err
+	}
+	if a.Kind != KindViewApp && a.Command.Executable == "" {
 		return errors.New("missing executable")
 	}
 	if strings.ContainsAny(a.Command.Executable, ";&|$`\n") {
@@ -126,9 +133,17 @@ func Validate(a App) error {
 			return fmt.Errorf("unsafe arg template %q", x)
 		}
 	}
+	if err := validateCapabilities(a.Capabilities); err != nil {
+		return err
+	}
 	for _, f := range a.Fields {
 		if f.ID == "" || !safeID.MatchString(f.ID) {
 			return fmt.Errorf("invalid field id %q", f.ID)
+		}
+		if f.Pattern != "" {
+			if _, err := regexp.Compile(f.Pattern); err != nil {
+				return fmt.Errorf("field %s: invalid pattern: %w", f.ID, err)
+			}
 		}
 	}
 	return nil

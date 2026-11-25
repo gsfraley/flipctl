@@ -28,7 +28,12 @@ const styles = `
 :root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#e8edf2;background:#091018}body{margin:0}main{max-width:1240px;margin:0 auto;padding:24px}.hero{display:flex;gap:18px;align-items:flex-start;justify-content:space-between;margin-bottom:18px}.hero h1{margin:0;font-size:34px}.subtitle{color:#9fb1c7;max-width:760px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:#101b29;border:1px solid #203047;border-radius:16px;padding:16px;box-shadow:0 12px 32px #0005}.card h2,.card h3{margin:0 0 10px}.view-block{background:#0b1420;border:1px solid #21334b;border-radius:14px;padding:14px;margin:12px 0}.field{display:grid;gap:4px;margin:10px 0}.field span{font-weight:650}.field input,.field select{background:#07111d;color:#f8fbff;border:1px solid #36516f;border-radius:10px;padding:10px}.hint{font-size:12px;color:#90a5bd}.button-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.primary{background:#52d273;color:#06110b;border:none;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer}.secondary{background:#22334a;color:#eaf3ff;border:1px solid #3a5575;border-radius:10px;padding:9px 12px;cursor:pointer}.danger{background:#4b1d25;color:#ffccd4;border:1px solid #963749;border-radius:10px;padding:9px 12px}.primary:disabled,.secondary:disabled,.danger:disabled{opacity:.5;cursor:not-allowed}.badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800}.badge.info{background:#233d68;color:#99c7ff}.badge.success{background:#173d29;color:#8ff0ad}.badge.warning{background:#4d3b18;color:#ffe27a}.badge.error{background:#4f1f29;color:#ffadbc}.list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.list li{background:#08111c;border:1px solid #1f3148;border-radius:10px;padding:10px}.list-item-main{display:flex;gap:10px;align-items:center;justify-content:space-between}.kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.kv{background:#08111c;border:1px solid #1f3148;border-radius:10px;padding:10px}.table{width:100%;border-collapse:collapse;margin-top:8px}.table th,.table td{text-align:left;border-bottom:1px solid #26384f;padding:6px}.log{background:#050a10;border:1px solid #1d2d42;border-radius:12px;padding:10px;max-height:260px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.log-line{white-space:pre-wrap;margin:2px 0}.stream{color:#71d0ff;margin-right:6px}.progress-track{height:10px;background:#07111d;border:1px solid #36516f;border-radius:999px;overflow:hidden}.progress-fill{height:100%;background:#52d273}.canvas-wrap{display:grid;place-items:center;background:#050a10;border-radius:14px;padding:14px}.canvas-wrap canvas{image-rendering:pixelated;width:512px;max-width:100%;height:auto;border:1px solid #3b536f}.note{background:#1d2b17;color:#d6ffc7;border:1px solid #4c7d3b;border-radius:12px;padding:10px;margin-bottom:14px}.empty{color:#91a4ba}@media(max-width:900px){.grid{grid-template-columns:1fr}.hero{display:block}}`;
 
 type Session = { sessionId: string; revision: number };
-type ApiEvent = { type: string; sessionId?: string; revision?: number };
+type ApiEvent = {
+  type: string;
+  sessionId?: string;
+  revision?: number;
+  registry?: { version: number; pluginId: string; change: string; tier?: string };
+};
 type FormValues = Record<string, string>;
 
 function formatProblem(body: any): string {
@@ -367,10 +372,19 @@ function App() {
       if (event.sessionId === session.sessionId)
         refreshView(session.sessionId).catch((e) => setNotice(`refresh failed: ${e}`));
     };
+    // Runtime plugin registration can add, replace or remove apps without a
+    // daemon restart; refetch the snapshot so the app list stays current.
+    const onRegistryChanged = (message: MessageEvent) => {
+      const event = JSON.parse(message.data) as ApiEvent;
+      setEvents((prev) => [event, ...prev].slice(0, 40));
+      refreshView(session.sessionId).catch((e) => setNotice(`refresh failed: ${e}`));
+    };
     es.addEventListener("view.changed", onViewChanged as EventListener);
+    es.addEventListener("registry.changed", onRegistryChanged as EventListener);
     es.onerror = () => setNotice("SSE disconnected; retrying automatically…");
     return () => {
       es.removeEventListener("view.changed", onViewChanged as EventListener);
+      es.removeEventListener("registry.changed", onRegistryChanged as EventListener);
       es.close();
     };
   }, [session?.sessionId]);
@@ -455,7 +469,9 @@ function App() {
         {events.length ? (
           events.map((event, i) => (
             <p key={i} class="hint">
-              {event.type} · {event.sessionId} · revision {event.revision}
+              {event.registry
+                ? `${event.type} · ${event.registry.pluginId} ${event.registry.change} · registry v${event.registry.version}`
+                : `${event.type} · ${event.sessionId} · revision ${event.revision}`}
             </p>
           ))
         ) : (

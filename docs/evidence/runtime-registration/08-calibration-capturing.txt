@@ -1,0 +1,25 @@
+FlipCTL LoRa antenna calibration
+view=assistant.c-demo.lora-calibration-view revision=14 session=s-1
+Actions: Capture packets (disabled)[view.capture] | Which reading was best?[view.advise] | Cancel[job.cancel] | Update form[form.update] | B
+
+notice summary
+info: Capture packets while you rotate the antenna, then ask which reading was best
+
+notice ephemeral-notice
+warning: Ephemeral app v0.1.0 registered at runtime (api:127.0.0.1 (confirmed on device) -> /tmp/flipctl-state/ephemeral/assistant.c-demo.lo
+
+form form — LoRa antenna calibration options
+• Packets per capture (int): 10
+
+key_value last-job — Last run
+• jobId: j-2
+• appId: field.lora-rx
+• state: running
+• records: 1
+
+progress progress
+Running field.lora-rx: 1 records so far
+
+table display-1 — Received packets (last 1 of 1)
+seq | rssi | snr | lat | lon
+1 | -82 | 4 | 46.94822 | 7.44749

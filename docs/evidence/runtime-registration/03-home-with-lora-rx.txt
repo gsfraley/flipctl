@@ -1,0 +1,12 @@
+FlipCTL FlipCTL Apps
+view=home-app-list revision=4 session=s-1
+
+list apps — Apps
+• Nmap [network.nmap] — Policy-limited host discovery using deterministic fake nmap
+• Ping [network.ping] — Test IP reachability with deterministic fake ping
+
+notice ephemeral-notice
+warning: Runtime-registered apps are ephemeral: they were added while FlipCTL was running, are not part of the system image, run sandboxed (
+
+list ephemeral-apps — Runtime-registered (ephemeral)
+• [ephemeral] LoRa receiver [field.lora-rx] — v0.1.0 · uses device /dev/ttyLoRa0 · Listen for LoRa packets and report RSSI, SNR and position

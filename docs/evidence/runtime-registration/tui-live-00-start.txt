@@ -1,0 +1,48 @@
+FlipCTL TUI │ session s-2 │ view=home-app-list │ rev=1 │ live │ focus document
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Notice: Ready. Canonical ViewDocument session mode.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────╮ ╭─────────────────────────────╮
+│◆ Canonical ViewDocument                                                                                  │ │Actions                      │
+│FlipCTL FlipCTL Apps                                                                                      │ │> Open Nmap [app.open]       │
+│view=home-app-list revision=1 session=s-2                                                                 │ │                             │
+│                                                                                                          │ │                             │
+│list apps — Apps                                                                                          │ │                             │
+│• Nmap [network.nmap] — Policy-limited host discovery using deterministic fake nmap                       │ │                             │
+│• Ping [network.ping] — Test IP reachability with deterministic fake ping                                 │ │                             │
+│                                                                                                          │ │                             │
+│Selectable list items:                                                                                    │ │                             │
+│> Nmap [network.nmap] · enter Open Nmap                                                                   │ │                             │
+│Ping [network.ping] · enter Open Ping                                                                     │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+│                                                                                                          │ │                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────╯
+q quit r refresh tab focus j/k move text edit backspace enter action c cancel

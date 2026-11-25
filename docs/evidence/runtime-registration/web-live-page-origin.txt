@@ -1,0 +1,3 @@
+page timeOrigin at start 1:1795642846456.3
+page timeOrigin at end   1:1795642846456.3
+same document: no reload happened

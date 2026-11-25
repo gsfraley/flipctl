@@ -34,6 +34,7 @@ describe("canonical Web live render paths", () => {
     }
     expect(entrypoint).toContain("/sessions");
     expect(entrypoint).toContain("view.changed");
+    expect(entrypoint).toContain("registry.changed");
     expect(entrypoint).toContain("/actions");
     expect(entrypoint).toContain("item.action");
     expect(entrypoint).toContain("Canvas renderer preview");

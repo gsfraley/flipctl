@@ -1,0 +1,13 @@
+FlipCTL LoRa receiver
+view=field.lora-rx-form revision=29 session=s-1
+Actions: Update form[form.update] | Start job[job.start] | Back[navigation.back]
+
+notice summary
+info: Listen for LoRa packets at a chosen spreading factor (simulated)
+
+notice ephemeral-notice
+warning: Ephemeral app v0.2.0 registered at runtime (api:127.0.0.1 -> /tmp/flipctl-state/ephemeral/field.lora-rx.yaml). Uses: device /dev/tt
+
+form form — LoRa receiver options
+• Packets (int): 12
+• Spreading factor (int): 9

@@ -25,6 +25,15 @@ make ci-support
 | ARM64 userspace | `make arm64-userspace-smoke` / CI `arm64-userspace-smoke` job | Uses Buildx/QEMU to build the runtime image for `linux/arm64`, starts it, records platform/inspection artifacts, and runs the same canonical fake Ping API flow. | Userspace container proof only; this is not RK3576 hardware emulation and does not prove kernel, USB, GPIO, timing, or device peripheral behavior. Requires Buildx/QEMU support and enough runner time/cache. |
 | Future hardware | To be defined when physical Flipper One/RK3576 access exists. | Would prove real hardware/kernel/peripheral integration. | Not part of MVP CI and no hardware validation is currently claimed. |
 
+Sandbox tests in `internal/sandbox` exercise bubblewrap directly (network namespace, device and filesystem isolation) and skip when a working `bwrap` is not available, for example inside an unprivileged container.
+
+Runtime registration has its own end-to-end demo against the compose stack, which captures each step's ViewDocument and renders it the same way as `docs/evidence`:
+
+```bash
+./examples/runtime-registration/demo.sh
+DEMO_SANDBOX=bwrap ./examples/runtime-registration/demo.sh
+```
+
 Use the Docker demo smoke separately when validating runtime packaging:
 
 ```bash

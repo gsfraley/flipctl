@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"github.com/flipperdevices/flipctl/internal/plugin"
+	"github.com/flipperdevices/flipctl/internal/sandbox"
 	"strings"
 	"sync"
 	"testing"
@@ -130,5 +131,28 @@ func TestCancelKillsChildProcessesPromptly(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancel did not stop the command and its children")
+	}
+}
+
+type recordingSandbox struct{ got sandbox.Policy }
+
+func (r *recordingSandbox) Name() string { return "recording" }
+func (r *recordingSandbox) Wrap(argv []string, p sandbox.Policy) ([]string, error) {
+	r.got = p
+	return append([]string{"env"}, argv...), nil
+}
+
+func TestRunWithOptionsWrapsCommandButReportsLogicalArgv(t *testing.T) {
+	a := plugin.App{ID: "t", Command: plugin.Command{Executable: "echo", Args: []string{"hi"}}}
+	sb := &recordingSandbox{}
+	res, err := RunWithOptions(context.Background(), a, nil, nil, Options{Sandbox: sb, Policy: sandbox.Policy{Devices: []string{"/dev/x"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(res.Argv, " ") != "echo hi" || res.Sandbox != "recording" || strings.TrimSpace(res.Stdout) != "hi" {
+		t.Fatalf("unexpected result %#v", res)
+	}
+	if len(sb.got.Devices) != 1 {
+		t.Fatalf("policy not passed: %#v", sb.got)
 	}
 }

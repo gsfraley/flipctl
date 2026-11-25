@@ -1,0 +1,19 @@
+FlipCTL FlipCTL Apps
+view=home-app-list revision=9 session=s-1
+Actions: Reject LoRa antenna calibration[device.reject_registration]
+
+list apps — Apps
+• Nmap [network.nmap] — Policy-limited host discovery using deterministic fake nmap
+• Ping [network.ping] — Test IP reachability with deterministic fake ping
+
+notice ephemeral-notice
+warning: Runtime-registered apps are ephemeral: they were added while FlipCTL was running, are not part of the system image, run sandboxed (
+
+list ephemeral-apps — Runtime-registered (ephemeral)
+• [ephemeral] LoRa receiver [field.lora-rx] — v0.1.0 · uses device /dev/ttyLoRa0 · Listen for LoRa packets and report RSSI, SNR and position
+
+notice pending-notice
+warning: Confirm with the device button. In this emulated build, the Confirm action stands in for the physical button press.
+
+list pending-registrations — Waiting for device confirmation
+• LoRa antenna calibration [assistant.c-demo.lora-calibration] — Register · v0.1.0 · requests device /dev/ttyLoRa0, sends data to assistant

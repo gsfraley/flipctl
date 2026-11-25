@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flipperdevices/flipctl/internal/assistant"
 	"github.com/flipperdevices/flipctl/internal/plugin"
 	"github.com/flipperdevices/flipctl/internal/sandbox"
 )
@@ -46,6 +47,8 @@ type Options struct {
 	// sensitive registrations stay pending until a DeviceConfirmer adapter
 	// confirms them.
 	EmulatedDeviceConfirm bool
+	// Assistant answers ViewApp ask/revise/act actions. Nil disables them.
+	Assistant assistant.Provider
 }
 
 // Pending is a registration or promotion waiting for device confirmation.
@@ -447,12 +450,6 @@ func (s *Server) RestoreEphemeral(entries []plugin.Entry) {
 	}
 }
 
-// checkRuntimePolicy applies rules that only make sense for apps that did not
-// ship with the image: their executables must live under a command root.
-func (s *Server) checkRuntimePolicy(a plugin.App) error {
-	return checkExecutableRoots(a.Command.Executable, s.opts.CommandRoots)
-}
-
 // CheckInstalled validates an installed entry loaded from the state directory.
 func (s *Server) CheckInstalled(a plugin.App) error { return s.checkRuntimePolicy(a) }
 
@@ -492,12 +489,6 @@ func checkExecutableRoots(exe string, roots []string) error {
 		}
 	}
 	return fmt.Errorf("executable %q is outside the allowed command roots %v", exe, roots)
-}
-
-// effectiveCapabilities are the capabilities the daemon enforces and asks the
-// user to confirm for a.
-func (s *Server) effectiveCapabilities(a plugin.App) plugin.Capabilities {
-	return a.Capabilities.Union(plugin.Capabilities{})
 }
 
 func (s *Server) registryChangedLocked(version uint64, id, change string, tier plugin.Tier) {

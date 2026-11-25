@@ -125,3 +125,48 @@ func TestCapabilitiesCoversDetectsEscalation(t *testing.T) {
 		t.Fatalf("bad union %#v", u)
 	}
 }
+
+const calibrationView = `apiVersion: flipctl.app/v1alpha1
+kind: ViewApp
+metadata: {id: assistant.c12.lora-cal, title: LoRa antenna calibration, version: 0.1.0}
+owner: {plugin: assistant, conversation: c-12}
+form:
+  - {id: count, label: Packets, type: int, default: "20", min: 5, max: 200}
+actions:
+  - id: capture
+    label: Capture packets
+    run: {plugin: field.lora-rx, args: {count: "{{count}}"}}
+  - id: advise
+    label: Which angle is best?
+    ask: {prompt: "Which antenna angle gives the best link?", context: [lastJob]}
+display:
+  - {from: lastJob, as: table, columns: [seq, rssi, snr]}
+`
+
+func TestViewAppComposesActionsWithoutExecutables(t *testing.T) {
+	a, err := Parse([]byte(calibrationView))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Kind != KindViewApp || !a.UsesAssistant() || strings.Join(a.RunTargets(), ",") != "field.lora-rx" {
+		t.Fatalf("unexpected view app %#v", a)
+	}
+	if act, _ := a.ActionByID("advise"); act.Mode() != "ask" {
+		t.Fatalf("advise mode %q", act.Mode())
+	}
+	bad := map[string]string{
+		"executable":    strings.Replace(calibrationView, "owner:", "execution: {executable: ./fakecmds/fake-ping}\nowner:", 1),
+		"declared caps": calibrationView + "capabilities: {network: true}\n",
+		"two bindings": strings.Replace(calibrationView, `    run: {plugin: field.lora-rx, args: {count: "{{count}}"}}`, `    run: {plugin: field.lora-rx}
+    ask: {prompt: hi}`, 1),
+		"no binding":        strings.Replace(calibrationView, `    run: {plugin: field.lora-rx, args: {count: "{{count}}"}}`+"\n", "", 1),
+		"shell in args":     strings.Replace(calibrationView, `"{{count}}"`, `"{{count}};reboot"`, 1),
+		"self run":          strings.Replace(calibrationView, "plugin: field.lora-rx", "plugin: assistant.c12.lora-cal", 1),
+		"actions on cmdapp": pingManifest + "actions: [{id: x, label: x, ask: {prompt: hi}}]\n",
+	}
+	for name, m := range bad {
+		if _, err := Parse([]byte(m)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

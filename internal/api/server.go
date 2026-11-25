@@ -29,6 +29,10 @@ type Server struct {
 	pending       map[string]*Pending
 	cancelReasons map[string]string
 	limiter       *rateLimiter
+	viewJobs      map[string]string
+	liveOutput    map[string]*strings.Builder
+	notes         map[string]assistantNote
+	asking        map[string]bool
 	mu            sync.Mutex
 	next          int
 	jobs          map[string]Job
@@ -46,12 +50,14 @@ type Job struct {
 	AppID string `json:"appId"`
 	// PluginVersion is the app version the job was started with. Replacing
 	// the app does not affect running jobs.
-	PluginVersion string        `json:"pluginVersion,omitempty"`
-	SessionID     string        `json:"sessionId,omitempty"`
-	State         string        `json:"state"`
-	Result        runner.Result `json:"result"`
-	Created       string        `json:"created"`
-	Updated       string        `json:"updated"`
+	PluginVersion string `json:"pluginVersion,omitempty"`
+	// ViewAppID is set when a ViewApp action started the job.
+	ViewAppID string        `json:"viewAppId,omitempty"`
+	SessionID string        `json:"sessionId,omitempty"`
+	State     string        `json:"state"`
+	Result    runner.Result `json:"result"`
+	Created   string        `json:"created"`
+	Updated   string        `json:"updated"`
 }
 type Session struct {
 	ID            string            `json:"sessionId"`
@@ -89,7 +95,7 @@ func New(apps []plugin.App, static http.Handler) *Server {
 
 // NewWithOptions serves apps from registry, which may change at runtime.
 func NewWithOptions(registry *plugin.Registry, opts Options) *Server {
-	return &Server{registry: registry, opts: opts, limiter: newRateLimiter(opts.JobRate, opts.JobBurst), pending: map[string]*Pending{}, cancelReasons: map[string]string{}, jobs: map[string]Job{}, cancels: map[string]context.CancelFunc{}, subs: map[chan Event]struct{}{}, static: opts.Static, sessionsStore: map[string]*Session{}, firstEventID: 1}
+	return &Server{registry: registry, opts: opts, limiter: newRateLimiter(opts.JobRate, opts.JobBurst), pending: map[string]*Pending{}, cancelReasons: map[string]string{}, viewJobs: map[string]string{}, liveOutput: map[string]*strings.Builder{}, notes: map[string]assistantNote{}, asking: map[string]bool{}, jobs: map[string]Job{}, cancels: map[string]context.CancelFunc{}, subs: map[chan Event]struct{}{}, static: opts.Static, sessionsStore: map[string]*Session{}, firstEventID: 1}
 }
 
 // Registry exposes the live registry (for the daemon and tests).
@@ -303,6 +309,17 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		s.viewDoc(w, req.SessionID)
 		return
 	}
+	if canonicalSessionAction && strings.HasPrefix(req.ActionID, "view.") {
+		s.mu.Lock()
+		status, code, err := s.handleViewActionLocked(ss, strings.TrimPrefix(req.ActionID, "view."), req.Fields)
+		s.mu.Unlock()
+		if err != nil {
+			writeErr(w, status, code, err.Error(), "actionId")
+			return
+		}
+		s.viewDoc(w, req.SessionID)
+		return
+	}
 	if canonicalSessionAction {
 		s.mu.Lock()
 		handled := s.handleSessionActionLocked(ss, req.ActionID, req.AppID, req.Fields, req.JobID)
@@ -339,22 +356,14 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.next++
-	id := "j-" + strconv.Itoa(s.next)
-	ctx, cancel := context.WithCancel(context.Background())
-	now := time.Now().Format(time.RFC3339)
-	job := Job{ID: id, JobID: id, AppID: a.ID, PluginVersion: a.Version, SessionID: req.SessionID, State: "running", Created: now, Updated: now}
-	s.jobs[id] = job
-	s.cancels[id] = cancel
+	job := s.startJobLocked(entry, req.Fields, req.SessionID, "")
 	if ss != nil {
-		ss.SelectedJobID = id
+		ss.SelectedJobID = job.ID
 		ss.CurrentAppID = a.ID
 		ss.Revision++
 		s.viewChangedLocked(ss)
 	}
-	s.evLocked("job.started", &job, "", "")
 	s.mu.Unlock()
-	go s.runJob(ctx, id, entry, req.Fields)
 	if canonicalSessionAction {
 		s.viewDoc(w, req.SessionID)
 		return
@@ -367,6 +376,17 @@ func (s *Server) runJob(ctx context.Context, id string, entry plugin.Entry, fiel
 		s.mu.Lock()
 		job := s.jobs[id]
 		s.evLocked("job.output", &job, stream, chunk)
+		if stream == "stdout" && job.ViewAppID != "" {
+			b := s.liveOutput[id]
+			if b == nil {
+				b = &strings.Builder{}
+				s.liveOutput[id] = b
+			}
+			if b.Len() < 64000 {
+				b.WriteString(chunk)
+			}
+			s.touchViewJobLocked(job)
+		}
 		for _, line := range strings.Split(chunk, "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
@@ -398,6 +418,8 @@ func (s *Server) runJob(ctx context.Context, id string, entry plugin.Entry, fiel
 		job.State = "done"
 	}
 	s.jobs[id] = job
+	delete(s.liveOutput, id)
+	s.touchViewJobLocked(job)
 	for _, ss := range s.sessionsStore {
 		if ss.SelectedJobID == id {
 			ss.Revision++
@@ -474,6 +496,9 @@ func (s *Server) projectLocked(ss *Session) viewdoc.Document {
 	}
 	entry, ok := s.registry.Snapshot().ByID(ss.CurrentAppID)
 	a := entry.App
+	if ok && a.Kind == plugin.KindViewApp {
+		return s.projectViewAppLocked(ss, entry)
+	}
 	if !ok {
 		doc.ViewID = "app-not-found"
 		doc.Blocks = []viewdoc.Block{{ID: "missing", Kind: "notice", Severity: "error", Text: "app not found"}}

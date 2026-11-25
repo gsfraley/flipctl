@@ -52,6 +52,9 @@ type App struct {
 	// Owner records which app and conversation registered this app, so
 	// archived registrations can be found and restored from that context.
 	Owner *Owner `json:"owner,omitempty" yaml:"owner"`
+	// Actions and Display are only used by kind ViewApp.
+	Actions []ViewAction     `json:"actions,omitempty" yaml:"actions"`
+	Display []DisplayBinding `json:"display,omitempty" yaml:"display"`
 }
 
 type Owner struct {
@@ -116,7 +119,10 @@ func Validate(a App) error {
 	if a.ID == "" || !safeID.MatchString(a.ID) {
 		return errors.New("invalid app id")
 	}
-	if a.Command.Executable == "" {
+	if err := validateViewApp(a); err != nil {
+		return err
+	}
+	if a.Kind != KindViewApp && a.Command.Executable == "" {
 		return errors.New("missing executable")
 	}
 	if strings.ContainsAny(a.Command.Executable, ";&|$`\n") {

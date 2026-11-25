@@ -450,8 +450,28 @@ func (s *Server) RestoreEphemeral(entries []plugin.Entry) {
 	}
 }
 
-// CheckInstalled validates an installed entry loaded from the state directory.
-func (s *Server) CheckInstalled(a plugin.App) error { return s.checkRuntimePolicy(a) }
+// AdoptInstalled activates installed entries loaded from the state
+// directory. Installed apps were confirmed when they were promoted, so they
+// keep their effective capabilities across restarts; they must still pass the
+// runtime policy. Command apps are adopted before views that run them.
+func (s *Server) AdoptInstalled(entries []plugin.Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].App.Kind != plugin.KindViewApp && entries[j].App.Kind == plugin.KindViewApp
+	})
+	for _, e := range entries {
+		if err := s.checkRuntimePolicy(e.App); err != nil {
+			slog.Warn("installed plugin skipped", "id", e.App.ID, "error", err)
+			continue
+		}
+		e.Tier, e.Granted = plugin.TierInstalled, s.effectiveCapabilities(e.App)
+		e.Source = "state:" + e.Source
+		if _, _, err := s.registry.Put(e); err != nil {
+			slog.Warn("installed plugin skipped", "id", e.App.ID, "error", err)
+		}
+	}
+}
 
 func checkExecutableRoots(exe string, roots []string) error {
 	if exe == "" {
@@ -504,8 +524,11 @@ func (s *Server) registryChangedLocked(version uint64, id, change string, tier p
 
 func (s *Server) infoForEntry(e plugin.Entry) pluginInfo {
 	g := e.Granted
-	u := e.Updated
-	info := pluginInfo{ID: e.App.ID, Title: e.App.Title, Version: e.App.Version, Kind: e.App.Kind, Tier: e.Tier, Source: e.Source, State: "active", Capabilities: e.App.Capabilities, Granted: &g, Owner: e.App.Owner, Updated: &u}
+	info := pluginInfo{ID: e.App.ID, Title: e.App.Title, Version: e.App.Version, Kind: e.App.Kind, Tier: e.Tier, Source: e.Source, State: "active", Capabilities: e.App.Capabilities, Granted: &g, Owner: e.App.Owner}
+	if !e.Updated.IsZero() {
+		u := e.Updated
+		info.Updated = &u
+	}
 	if p, ok := s.pending[e.App.ID]; ok {
 		info.Pending = p
 	}

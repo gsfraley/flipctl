@@ -3,6 +3,8 @@ package runner
 import (
 	"context"
 	"github.com/flipperdevices/flipctl/internal/plugin"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -77,5 +79,56 @@ func TestRunWithCallbackStreamsBeforeCompletion(t *testing.T) {
 		}
 	default:
 		t.Fatal("missing streamed callback")
+	}
+}
+
+func TestRunWithCallbackKeepsAllOutputLines(t *testing.T) {
+	a := plugin.App{ID: "lines", Command: plugin.Command{Executable: "sh", Args: []string{"-c", "i=1; while [ $i -le 40 ]; do echo line$i; echo err$i >&2; i=$((i+1)); done"}}}
+	for run := 0; run < 50; run++ {
+		var mu sync.Mutex
+		got := map[string]int{}
+		res, err := RunWithCallback(context.Background(), a, nil, func(stream, chunk string) {
+			mu.Lock()
+			got[stream]++
+			mu.Unlock()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Every line must reach both the result and the streaming callback,
+		// including the last ones written right before the process exits.
+		if n := strings.Count(res.Stdout, "\n"); n != 40 || got["stdout"] != 40 || got["stderr"] != 40 || !strings.HasSuffix(res.Stdout, "line40\n") {
+			t.Fatalf("run %d: stdout lines=%d callbacks=%v tail=%q", run, n, got, tail(res.Stdout))
+		}
+	}
+}
+
+func tail(s string) string {
+	if len(s) > 20 {
+		return s[len(s)-20:]
+	}
+	return s
+}
+
+func TestCancelKillsChildProcessesPromptly(t *testing.T) {
+	a := plugin.App{ID: "slow", Command: plugin.Command{Executable: "sh", Args: []string{"-c", "echo started; sleep 30; echo never"}, TimeoutSeconds: 60}}
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	var once sync.Once
+	done := make(chan Result)
+	go func() {
+		r, _ := RunWithCallback(ctx, a, nil, func(stream, chunk string) { once.Do(func() { close(started) }) })
+		done <- r
+	}()
+	<-started
+	begin := time.Now()
+	cancel()
+	select {
+	case r := <-done:
+		if d := time.Since(begin); d > time.Second || r.Error != "canceled" || strings.Contains(r.Stdout, "never") {
+			t.Fatalf("cancel took %v, result %#v", d, r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancel did not stop the command and its children")
 	}
 }

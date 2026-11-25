@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/flipperdevices/flipctl/internal/plugin"
+	"github.com/flipperdevices/flipctl/internal/sandbox"
 	"os"
 	"os/exec"
 	"regexp"
@@ -23,6 +24,15 @@ type Result struct {
 	Output string   `json:"output"`
 	Parsed any      `json:"parsed"`
 	Error  string   `json:"error,omitempty"`
+	// Sandbox names the sandbox the command ran under, when one was requested.
+	Sandbox string `json:"sandbox,omitempty"`
+}
+
+// Options controls how a command is executed.
+type Options struct {
+	// Sandbox wraps the command. Nil runs it directly, as before.
+	Sandbox sandbox.Sandbox
+	Policy  sandbox.Policy
 }
 
 func Build(a plugin.App, vals map[string]string) ([]string, error) {
@@ -63,9 +73,21 @@ func Run(ctx context.Context, a plugin.App, vals map[string]string) (Result, err
 	return RunWithCallback(ctx, a, vals, nil)
 }
 func RunWithCallback(ctx context.Context, a plugin.App, vals map[string]string, cb EventCallback) (Result, error) {
+	return RunWithOptions(ctx, a, vals, cb, Options{})
+}
+
+// RunWithOptions runs a with optional sandboxing. Result.Argv always reports
+// the logical command, not the sandbox wrapper.
+func RunWithOptions(ctx context.Context, a plugin.App, vals map[string]string, cb EventCallback, opts Options) (Result, error) {
 	argv, e := Build(a, vals)
 	if e != nil {
 		return Result{}, e
+	}
+	execArgv := argv
+	if opts.Sandbox != nil {
+		if execArgv, e = opts.Sandbox.Wrap(argv, opts.Policy); e != nil {
+			return Result{Argv: argv, Error: e.Error(), Sandbox: opts.Sandbox.Name()}, e
+		}
 	}
 	to := time.Duration(a.Command.TimeoutSeconds) * time.Second
 	if to == 0 {
@@ -73,7 +95,7 @@ func RunWithCallback(ctx context.Context, a plugin.App, vals map[string]string, 
 	}
 	cctx, cancel := context.WithTimeout(ctx, to)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
+	cmd := exec.CommandContext(cctx, execArgv[0], execArgv[1:]...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=", "LANG=C", "LC_ALL=C"}
 	cmd.Dir = "."
 	killProcessGroupOnCancel(cmd)
@@ -98,6 +120,9 @@ func RunWithCallback(ctx context.Context, a plugin.App, vals map[string]string, 
 	}
 	out, errout := limit(stdout.String(), 64000), limit(stderr.String(), 16000)
 	r := Result{Argv: argv, Stdout: out, Stderr: errout, Output: limit(out+errout, 64000)}
+	if opts.Sandbox != nil {
+		r.Sandbox = opts.Sandbox.Name()
+	}
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
 		r.Error = "timeout"
 		return r, cctx.Err()

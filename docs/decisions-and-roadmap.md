@@ -14,6 +14,7 @@ The purpose is not to avoid decisions. It is to make the timing and ownership of
 | Work state | Shared daemon-owned jobs | Jobs survive client disconnects and can be operated cross-frontend | Durable recovery after daemon restart is deferred |
 | Live updates | SSE with snapshot refetch | Browser-native and easy to debug | A compact/bidirectional transport may be useful later |
 | Initial plugins | Declarative command apps | Small, reviewable, ideal for Ping/Nmap | Complex services need a later plugin tier |
+| Plugin registration | Catalog at startup plus runtime registration of the same declared manifests into a versioned registry ([ADR-0005](adr/0005-runtime-plugin-registration.md)) | Field tools, scripts and assistants can add interfaces without a restart | Needs enforced capabilities, a device confirmation gate and a sandbox; ephemeral by default |
 | TUI | Bubble Tea | Existing Go toolchain and working prototype | Ratatui remains a future alternative |
 | Embedded UI | Canvas renderer preview | Proves the semantic model fits 256×144 | Physical display and input integration remain hardware work |
 | Tests | Fake tools + Docker + ARM64 smoke | Reproducible without a device | Does not prove device-specific peripherals |
@@ -108,7 +109,15 @@ Simple diagnostics can remain command apps. NetworkManager, systemd, ModemManage
 
 **Decision trigger:** when stateful system operations need richer error handling and lifecycle semantics than a CLI wrapper provides.
 
-### 7. TUI toolkit
+### 7. Runtime plugin registration
+
+**Current proposal:** runtime-registered apps live in an `ephemeral` tier, are validated exactly like catalog apps, run under bubblewrap with only their granted capabilities, and wait for a device confirmation when they ask for network, devices, RF transmission or the assistant. See [Runtime registration](runtime-registration.md).
+
+**Open:** off by default per OS profile, Unix-socket-only registration, signed manifests for promotion, per-plugin UIDs, and a streaming ViewDocument block for live telemetry.
+
+**Decision trigger:** before the first image that exposes the registration API outside development builds.
+
+### 8. TUI toolkit
 
 Bubble Tea is the MVP choice. Ratatui is a serious alternative if the project later adopts Rust broadly or needs its immediate-mode layout ecosystem.
 
@@ -145,6 +154,7 @@ This repository covers this iteration.
 ### Iteration 4 — ecosystem
 
 - supervised native plugin protocol;
+- on-device assistant app driving runtime registration (provider-neutral, sandboxed, behind the device confirmation gate);
 - plugin SDK and compatibility policy;
 - package/distribution model;
 - optional Wasm component tier;

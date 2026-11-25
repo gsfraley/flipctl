@@ -183,3 +183,25 @@ func TestRuntimeRegistrationExamplesAreValid(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginGuideManifestExamplesParse(t *testing.T) {
+	b, err := os.ReadFile("../../docs/plugin.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(string(b), "```yaml\n")
+	n := 0
+	for _, p := range parts[1:] {
+		block := p[:strings.Index(p, "```")]
+		if !strings.HasPrefix(block, "apiVersion:") {
+			continue
+		}
+		n++
+		if _, err := Parse([]byte(block)); err != nil {
+			t.Errorf("docs/plugin.md example %d: %v", n, err)
+		}
+	}
+	if n < 2 {
+		t.Fatalf("found %d manifest examples", n)
+	}
+}

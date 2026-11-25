@@ -140,6 +140,7 @@ These are documented as decision handoffs rather than hidden gaps.
 - [Decisions, handoffs, and roadmap](docs/decisions-and-roadmap.md)
 - [ViewDocument contract](docs/view-document.md)
 - [Plugin model](docs/plugin.md)
+- [Runtime registration of sandboxed plugins](docs/runtime-registration.md)
 - [Testing strategy](docs/testing.md)
 
 ## Relationship to the Flipper One vision

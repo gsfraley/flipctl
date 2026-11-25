@@ -3,7 +3,6 @@ package plugin
 import (
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,16 +62,9 @@ func LoadDir(dir string) ([]App, error) {
 		if e != nil {
 			return e
 		}
-		var a App
-		if e = yaml.Unmarshal(b, &a); e != nil {
-			return e
-		}
-		normalize(&a)
-		if e = Validate(a); e != nil {
+		a, e := Parse(b)
+		if e != nil {
 			return fmt.Errorf("%s: %w", p, e)
-		}
-		if a.Availability == nil {
-			a.Availability = map[string]string{"state": "available"}
 		}
 		out = append(out, a)
 		return nil
@@ -129,6 +121,11 @@ func Validate(a App) error {
 	for _, f := range a.Fields {
 		if f.ID == "" || !safeID.MatchString(f.ID) {
 			return fmt.Errorf("invalid field id %q", f.ID)
+		}
+		if f.Pattern != "" {
+			if _, err := regexp.Compile(f.Pattern); err != nil {
+				return fmt.Errorf("field %s: invalid pattern: %w", f.ID, err)
+			}
 		}
 	}
 	return nil

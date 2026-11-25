@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flipctl.dev/schemas/plugin-manifest.json",
+  "title": "FlipCTL plugin manifest",
+  "description": "Declarative app manifest accepted from plugin directories and from the runtime registration API. Both paths validate against this schema before semantic checks in internal/plugin.Validate.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {"const": "flipctl.app/v1alpha1"},
+    "kind": {"enum": ["CommandApp"]},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+        "summary": {"type": "string", "maxLength": 280},
+        "category": {"type": "string", "maxLength": 40},
+        "version": {"type": "string", "maxLength": 40}
+      }
+    },
+    "form": {"$ref": "#/$defs/fields"},
+    "execution": {"$ref": "#/$defs/command"},
+    "parser": {"type": "string", "maxLength": 40},
+    "policy": {"type": "object"},
+    "availability": {"type": "object", "additionalProperties": {"type": "string"}},
+    "id": {"$ref": "#/$defs/id", "deprecated": true},
+    "title": {"type": "string", "deprecated": true},
+    "summary": {"type": "string", "deprecated": true},
+    "category": {"type": "string", "deprecated": true},
+    "version": {"type": "string", "deprecated": true},
+    "fields": {"$ref": "#/$defs/fields", "deprecated": true},
+    "command": {"$ref": "#/$defs/command", "deprecated": true}
+  },
+  "anyOf": [{"required": ["metadata"]}, {"required": ["id"]}],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-zA-Z0-9_.-]+$", "minLength": 1, "maxLength": 96},
+    "fields": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "label": {"type": "string", "maxLength": 80},
+          "type": {"enum": ["string", "int"]},
+          "default": {"type": "string"},
+          "required": {"type": "boolean"},
+          "pattern": {"type": "string", "maxLength": 256},
+          "min": {"type": "integer"},
+          "max": {"type": "integer"}
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable"],
+      "properties": {
+        "executable": {"type": "string", "minLength": 1},
+        "args": {"type": "array", "maxItems": 64, "items": {"type": "string"}},
+        "timeoutSeconds": {"type": "integer", "minimum": 0, "maximum": 3600},
+        "parser": {"type": "string", "maxLength": 40}
+      }
+    }
+  }
+}

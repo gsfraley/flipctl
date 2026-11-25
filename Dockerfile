@@ -11,6 +11,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
+COPY schemas/ schemas/
 RUN go build -o /out/flipctld ./cmd/flipctld && go build -o /out/flipctl-tui ./cmd/flipctl-tui
 
 FROM debian:bookworm-slim AS runtime-base

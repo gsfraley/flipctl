@@ -1,0 +1,13 @@
+FlipCTL FlipCTL Apps
+view=home-app-list revision=2 session=s-1
+Actions: Reject LoRa receiver[device.reject_registration]
+
+list apps — Apps
+• Nmap [network.nmap] — Policy-limited host discovery using deterministic fake nmap
+• Ping [network.ping] — Test IP reachability with deterministic fake ping
+
+notice pending-notice
+warning: Confirm with the device button. In this emulated build, the Confirm action stands in for the physical button press.
+
+list pending-registrations — Waiting for device confirmation
+• LoRa receiver [field.lora-rx] — Register · v0.1.0 · requests device /dev/ttyLoRa0

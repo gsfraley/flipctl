@@ -1,0 +1,6 @@
+FlipCTL FlipCTL Apps
+view=home-app-list revision=32 session=s-1
+
+list apps — Apps
+• Nmap [network.nmap] — Policy-limited host discovery using deterministic fake nmap
+• Ping [network.ping] — Test IP reachability with deterministic fake ping

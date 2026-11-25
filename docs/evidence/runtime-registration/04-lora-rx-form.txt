@@ -1,0 +1,12 @@
+FlipCTL LoRa receiver
+view=field.lora-rx-form revision=5 session=s-1
+Actions: Update form[form.update] | Start job[job.start] | Back[navigation.back]
+
+notice summary
+info: Listen for LoRa packets and report RSSI, SNR and position (simulated)
+
+notice ephemeral-notice
+warning: Ephemeral app v0.1.0 registered at runtime (api:127.0.0.1 (confirmed on device) -> /tmp/flipctl-state/ephemeral/field.lora-rx.yaml)
+
+form form — LoRa receiver options
+• Packets (int): 12

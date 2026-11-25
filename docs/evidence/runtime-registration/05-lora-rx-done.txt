@@ -1,0 +1,26 @@
+FlipCTL Job j-1
+view=field.lora-rx-done revision=7 session=s-1
+Actions: Back[navigation.back] | Run again[job.run_again]
+
+key_value meta — Job
+• jobId: j-1
+• appId: field.lora-rx
+• state: done
+
+log log — Output
+[l-1] stdout {"seq":1,"rssi":-82,"snr":4.0,"lat":46.94822,"lon":7.44749,"sf":7}
+[l-2] stdout {"seq":2,"rssi":-91,"snr":-0.5,"lat":46.94834,"lon":7.44758,"sf":7}
+[l-3] stdout {"seq":3,"rssi":-77,"snr":6.5,"lat":46.94846,"lon":7.44767,"sf":7}
+[l-4] stdout {"seq":4,"rssi":-86,"snr":2.0,"lat":46.94858,"lon":7.44776,"sf":7}
+[l-5] stdout {"seq":5,"rssi":-95,"snr":-2.5,"lat":46.94870,"lon":7.44785,"sf":7}
+[l-6] stdout {"seq":6,"rssi":-81,"snr":4.5,"lat":46.94882,"lon":7.44794,"sf":7}
+[l-7] stdout {"seq":7,"rssi":-90,"snr":0.0,"lat":46.94894,"lon":7.44803,"sf":7}
+[l-8] stdout {"seq":8,"rssi":-76,"snr":7.0,"lat":46.94906,"lon":7.44812,"sf":7}
+[l-9] stdout {"seq":9,"rssi":-85,"snr":2.5,"lat":46.94918,"lon":7.44821,"sf":7}
+[l-10] stdout {"seq":10,"rssi":-94,"snr":-2.0,"lat":46.94930,"lon":7.44830,"sf":7}
+[l-11] stdout {"seq":11,"rssi":-80,"snr":5.0,"lat":46.94942,"lon":7.44839,"sf":7}
+[l-12] stdout {"seq":12,"rssi":-89,"snr":0.5,"lat":46.94954,"lon":7.44848,"sf":7}
+
+table result — Result
+Field | Value
+error | 

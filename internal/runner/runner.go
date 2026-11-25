@@ -1,19 +1,16 @@
 package runner
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/flipperdevices/flipctl/internal/plugin"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -79,28 +76,25 @@ func RunWithCallback(ctx context.Context, a plugin.App, vals map[string]string, 
 	cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=", "LANG=C", "LC_ALL=C"}
 	cmd.Dir = "."
+	killProcessGroupOnCancel(cmd)
 	var stdout, stderr bytes.Buffer
 	if cb == nil {
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		e = cmd.Run()
 	} else {
-		var wg sync.WaitGroup
-		outPipe, pe := cmd.StdoutPipe()
-		if pe != nil {
-			return Result{}, pe
-		}
-		errPipe, pe := cmd.StderrPipe()
-		if pe != nil {
-			return Result{}, pe
-		}
-		if e = cmd.Start(); e == nil {
-			wg.Add(2)
-			go captureStream(&wg, outPipe, &stdout, "stdout", cb)
-			go captureStream(&wg, errPipe, &stderr, "stderr", cb)
-			e = cmd.Wait()
-			wg.Wait()
-		}
+		// Hand exec plain writers instead of reading StdoutPipe/StderrPipe
+		// ourselves: Wait then blocks until all output has been copied, so the
+		// last lines a command prints before exiting are never dropped.
+		// WaitDelay bounds that wait when a canceled command leaves a
+		// grandchild holding the pipe open.
+		outW := &lineWriter{stream: "stdout", buf: &stdout, cb: cb}
+		errW := &lineWriter{stream: "stderr", buf: &stderr, cb: cb}
+		cmd.Stdout, cmd.Stderr = outW, errW
+		cmd.WaitDelay = waitDelay
+		e = cmd.Run()
+		outW.flush()
+		errW.flush()
 	}
 	out, errout := limit(stdout.String(), 64000), limit(stderr.String(), 16000)
 	r := Result{Argv: argv, Stdout: out, Stderr: errout, Output: limit(out+errout, 64000)}
@@ -117,16 +111,52 @@ func RunWithCallback(ctx context.Context, a plugin.App, vals map[string]string, 
 	}
 	return r, e
 }
-func captureStream(wg *sync.WaitGroup, r io.Reader, buf *bytes.Buffer, stream string, cb EventCallback) {
-	defer wg.Done()
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 4096), 1024*1024)
-	for s.Scan() {
-		line := s.Text() + "\n"
-		buf.WriteString(line)
-		cb(stream, line)
+
+// waitDelay is how long Wait keeps copying output after a command is killed.
+var waitDelay = 2 * time.Second
+
+// maxLine bounds a single unterminated line, like the previous 1 MiB scanner buffer.
+const maxLine = 1024 * 1024
+
+// lineWriter buffers command output and reports it to the callback one line at
+// a time, with the same framing as bufio.ScanLines plus a trailing newline.
+type lineWriter struct {
+	stream  string
+	buf     *bytes.Buffer
+	cb      EventCallback
+	partial []byte
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.partial = append(w.partial, p...)
+	for {
+		i := bytes.IndexByte(w.partial, '\n')
+		if i < 0 {
+			break
+		}
+		w.emit(w.partial[:i])
+		w.partial = w.partial[i+1:]
+	}
+	if len(w.partial) > maxLine {
+		w.emit(w.partial)
+		w.partial = nil
+	}
+	return len(p), nil
+}
+
+func (w *lineWriter) emit(line []byte) {
+	l := strings.TrimSuffix(string(line), "\r") + "\n"
+	w.buf.WriteString(l)
+	w.cb(w.stream, l)
+}
+
+func (w *lineWriter) flush() {
+	if len(w.partial) > 0 {
+		w.emit(w.partial)
+		w.partial = nil
 	}
 }
+
 func limit(s string, n int) string {
 	if len(s) > n {
 		return s[:n]

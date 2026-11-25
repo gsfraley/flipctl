@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Simulated LoRa receiver for demos and tests. Streams one JSON object per
+# "received" packet: seq, rssi (dBm), snr (dB), lat/lon of the receiver and
+# the spreading factor. Output is deterministic for a given argument set.
+#
+# usage: fake-lora-rx [-n COUNT] [-i SECONDS_BETWEEN_PACKETS] [--sf 7..12]
+n=20
+interval=0.2
+sf=7
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -n) n="$2"; shift 2 ;;
+    -i) interval="$2"; shift 2 ;;
+    --sf) sf="$2"; shift 2 ;;
+    *) echo "fake-lora-rx: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
+awk -v n="$n" -v sf="$sf" -v interval="$interval" 'BEGIN {
+  for (i = 1; i <= n; i++) {
+    a = (i * 37) % 23
+    rssi = -96 + a + (sf - 7) * 2
+    snr = a / 2.0 - 3 + (sf - 7) * 1.5
+    printf "{\"seq\":%d,\"rssi\":%d,\"snr\":%.1f,\"lat\":%.5f,\"lon\":%.5f,\"sf\":%d}\n", i, rssi, snr, 46.94810 + i * 0.00012, 7.44740 + i * 0.00009, sf
+    fflush()
+    if (i < n) system("sleep " interval)
+  }
+}'

@@ -1,0 +1,29 @@
+# Revised receiver: adds a spreading-factor field. Same capabilities, so the
+# replacement is applied immediately and running jobs keep the old version.
+apiVersion: flipctl.app/v1alpha1
+kind: CommandApp
+metadata:
+  id: field.lora-rx
+  title: LoRa receiver
+  summary: Listen for LoRa packets at a chosen spreading factor (simulated)
+  category: Field
+  version: 0.2.0
+form:
+  - id: count
+    label: Packets
+    type: int
+    default: "12"
+    min: 1
+    max: 200
+  - id: sf
+    label: Spreading factor
+    type: int
+    default: "9"
+    min: 7
+    max: 12
+execution:
+  executable: ./fakecmds/fake-lora-rx
+  args: ["-n", "{{count}}", "--sf", "{{sf}}", "-i", "0.15"]
+  timeoutSeconds: 60
+capabilities:
+  devices: [/dev/ttyLoRa0]

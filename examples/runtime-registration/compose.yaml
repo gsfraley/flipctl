@@ -1,0 +1,23 @@
+# Demo override: enables runtime registration features on the default stack.
+#   docker compose -f docker-compose.yml -f examples/runtime-registration/compose.yaml up --build
+services:
+  flipctld:
+    command:
+      - flipctld
+      - -addr
+      - ":8080"
+      - -plugins
+      - plugins
+      - -web
+      - web/dist
+      - -state-dir
+      - /tmp/flipctl-state
+      - -command-roots
+      - fakecmds
+      - -sandbox
+      - auto
+      - -emulated-device-confirm
+      - -assistant
+      - scripted
+      - -assistant-label
+      - Scripted assistant

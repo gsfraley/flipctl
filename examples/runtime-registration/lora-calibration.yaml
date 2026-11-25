@@ -1,0 +1,39 @@
+# A generated "sub-plugin": a view with no executable of its own. Its capture
+# button runs the registered receiver; its second button asks the assistant.
+# Capabilities are computed by the daemon (the receiver's device grant plus
+# sending data to the assistant), so this also needs a device confirmation.
+apiVersion: flipctl.app/v1alpha1
+kind: ViewApp
+metadata:
+  id: assistant.c-demo.lora-calibration
+  title: LoRa antenna calibration
+  summary: Capture packets while you rotate the antenna, then ask which reading was best
+  category: Field
+  version: 0.1.0
+owner:
+  plugin: assistant
+  conversation: c-demo
+form:
+  - id: packets
+    label: Packets per capture
+    type: int
+    default: "10"
+    min: 1
+    max: 100
+actions:
+  - id: capture
+    label: Capture packets
+    run:
+      plugin: field.lora-rx
+      args: {count: "{{packets}}"}
+  - id: advise
+    label: Which reading was best?
+    ask:
+      prompt: "I rotated the antenna during this capture. Which packet had the best link, and where was I?"
+      context: [lastJob]
+display:
+  - from: lastJob
+    as: table
+    title: Received packets
+    columns: [seq, rssi, snr, lat, lon]
+    limit: 8

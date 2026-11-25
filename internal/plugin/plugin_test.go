@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -167,6 +168,18 @@ func TestViewAppComposesActionsWithoutExecutables(t *testing.T) {
 	for name, m := range bad {
 		if _, err := Parse([]byte(m)); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestRuntimeRegistrationExamplesAreValid(t *testing.T) {
+	for _, f := range []string{"lora-rx.yaml", "lora-rx-v2.yaml", "lora-calibration.yaml"} {
+		b, err := os.ReadFile("../../examples/runtime-registration/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Parse(b); err != nil {
+			t.Errorf("%s: %v", f, err)
 		}
 	}
 }

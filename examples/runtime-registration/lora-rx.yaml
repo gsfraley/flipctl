@@ -1,0 +1,23 @@
+# A field LoRa receiver registered at runtime. It declares access to the
+# radio's serial device, so registration waits for a device confirmation.
+apiVersion: flipctl.app/v1alpha1
+kind: CommandApp
+metadata:
+  id: field.lora-rx
+  title: LoRa receiver
+  summary: Listen for LoRa packets and report RSSI, SNR and position (simulated)
+  category: Field
+  version: 0.1.0
+form:
+  - id: count
+    label: Packets
+    type: int
+    default: "12"
+    min: 1
+    max: 200
+execution:
+  executable: ./fakecmds/fake-lora-rx
+  args: ["-n", "{{count}}", "-i", "0.15"]
+  timeoutSeconds: 60
+capabilities:
+  devices: [/dev/ttyLoRa0]

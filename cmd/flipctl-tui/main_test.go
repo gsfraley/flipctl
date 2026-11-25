@@ -411,3 +411,15 @@ func TestViewFillsExactlyTheWindowHeight(t *testing.T) {
 		}
 	}
 }
+
+func TestWatchEventsRefreshesOnRegistryChanged(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("id: 7\nevent: registry.changed\ndata: {\"id\":7,\"type\":\"registry.changed\",\"registry\":{\"version\":2,\"pluginId\":\"field.lora-rx\",\"change\":\"added\"}}\n\n"))
+	}))
+	defer ts.Close()
+	msg := model{base: ts.URL, sessionID: "s-1"}.watchEvents()
+	if changed, ok := msg.(sseChangedMsg); !ok || changed.lastEventID != 7 {
+		t.Fatalf("registry.changed did not trigger a refresh: %#v", msg)
+	}
+}

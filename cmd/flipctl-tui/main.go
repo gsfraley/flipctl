@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -41,6 +43,10 @@ type model struct {
 	width        int
 	height       int
 	detail       viewport.Model
+	// lastEventID is the highest SSE event id this client has consumed. The
+	// event stream replays its bounded history to new subscribers, so every
+	// reconnect must resume after this id instead of from the beginning.
+	lastEventID int
 }
 
 type loaded struct {
@@ -48,10 +54,18 @@ type loaded struct {
 	viewDoc   *viewdoc.Document
 }
 type statusMsg string
-type sseChangedMsg struct{}
-type sseStatusMsg string
+type sseChangedMsg struct{ lastEventID int }
+type sseStatusMsg struct {
+	text        string
+	lastEventID int
+}
+type sseReconnectMsg struct{}
+
+// sseReconnectDelay throttles resubscription after the daemon closes the stream.
+var sseReconnectDelay = time.Second
 
 type tuiEvent struct {
+	ID        int    `json:"id"`
 	Type      string `json:"type"`
 	SessionID string `json:"sessionId"`
 	Revision  int    `json:"revision"`
@@ -156,11 +170,16 @@ func getJSON(url string, v any) error {
 }
 
 func (m model) watchEvents() tea.Msg {
-	resp, err := http.Get(m.base + "/api/v1/events")
+	url := m.base + "/api/v1/events"
+	if m.lastEventID > 0 {
+		url += "?after=" + strconv.Itoa(m.lastEventID)
+	}
+	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	last := m.lastEventID
 	scanner := bufio.NewScanner(resp.Body)
 	var data strings.Builder
 	for scanner.Scan() {
@@ -171,8 +190,17 @@ func (m model) watchEvents() tea.Msg {
 		}
 		if line == "" && data.Len() > 0 {
 			var e tuiEvent
-			if json.Unmarshal([]byte(data.String()), &e) == nil && e.Type == "view.changed" && (m.sessionID == "" || e.SessionID == "" || e.SessionID == m.sessionID) {
-				return sseChangedMsg{}
+			if json.Unmarshal([]byte(data.String()), &e) == nil {
+				if e.ID > last {
+					last = e.ID
+				}
+				if e.Type == "events.reset" {
+					// Replay window no longer covers our position: resync from a snapshot.
+					return sseChangedMsg{lastEventID: last}
+				}
+				if e.Type == "view.changed" && (m.sessionID == "" || e.SessionID == "" || e.SessionID == m.sessionID) {
+					return sseChangedMsg{lastEventID: last}
+				}
 			}
 			data.Reset()
 		}
@@ -180,7 +208,7 @@ func (m model) watchEvents() tea.Msg {
 	if err := scanner.Err(); err != nil {
 		return err
 	}
-	return sseStatusMsg("event stream closed")
+	return sseStatusMsg{text: "event stream closed", lastEventID: last}
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -190,11 +218,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncEditBuffers()
 		m.clampCursors()
 	case sseChangedMsg:
+		m.lastEventID = max(m.lastEventID, x.lastEventID)
 		m.notice = "view.changed received; refreshing canonical view"
 		return m, tea.Batch(m.refresh, m.watchEvents)
 	case sseStatusMsg:
+		m.lastEventID = max(m.lastEventID, x.lastEventID)
 		m.connected = false
-		m.notice = string(x)
+		m.notice = x.text
+		return m, tea.Tick(sseReconnectDelay, func(time.Time) tea.Msg { return sseReconnectMsg{} })
+	case sseReconnectMsg:
 		return m, m.watchEvents
 	case statusMsg:
 		m.notice = string(x)

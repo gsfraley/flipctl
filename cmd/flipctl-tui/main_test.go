@@ -7,7 +7,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/flipperdevices/flipctl/internal/api"
+	"github.com/flipperdevices/flipctl/internal/plugin"
 	"github.com/flipperdevices/flipctl/internal/viewdoc"
 )
 
@@ -321,4 +325,75 @@ func requireParams(t *testing.T, got map[string]any) map[string]any {
 		t.Fatalf("missing params in request %#v", got)
 	}
 	return params
+}
+
+func TestWatchEventsResumesAfterLastConsumedEventID(t *testing.T) {
+	var queries []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if r.URL.Query().Get("after") == "" {
+			_, _ = w.Write([]byte("id: 3\nevent: job.started\ndata: {\"id\":3,\"type\":\"job.started\"}\n\n"))
+			_, _ = w.Write([]byte("id: 5\nevent: view.changed\ndata: {\"id\":5,\"type\":\"view.changed\",\"sessionId\":\"s-1\",\"revision\":2}\n\n"))
+		}
+	}))
+	defer ts.Close()
+	m := model{base: ts.URL, sessionID: "s-1", editBuffers: map[string]string{}}
+	msg := m.watchEvents()
+	changed, ok := msg.(sseChangedMsg)
+	if !ok || changed.lastEventID != 5 {
+		t.Fatalf("first watch returned %#v", msg)
+	}
+	next, _ := m.Update(changed)
+	m = next.(model)
+	if m.lastEventID != 5 {
+		t.Fatalf("lastEventID not recorded: %d", m.lastEventID)
+	}
+	msg = m.watchEvents()
+	if _, ok := msg.(sseStatusMsg); !ok {
+		t.Fatalf("resumed watch should not re-deliver consumed events, got %#v", msg)
+	}
+	if strings.Join(queries, "|") != "|after=5" {
+		t.Fatalf("unexpected subscribe queries %q", queries)
+	}
+}
+
+func TestWatchEventsAgainstDaemonDoesNotReplayConsumedViewChanged(t *testing.T) {
+	apps, err := plugin.LoadDir("../../plugins")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(api.New(apps, nil).Handler())
+	// The SSE handler blocks until its client disconnects, so drop client
+	// connections before Close waits for outstanding requests.
+	defer ts.Close()
+	defer ts.CloseClientConnections()
+	m := model{base: ts.URL, editBuffers: map[string]string{}}
+	loadedMsg, ok := m.refresh().(loaded)
+	if !ok {
+		t.Fatal("refresh failed")
+	}
+	next, _ := m.Update(loadedMsg)
+	m = next.(model)
+	body := `{"actionId":"app.open","viewId":"home-app-list","revision":1,"params":{"appId":"network.ping"}}`
+	resp, err := http.Post(ts.URL+"/api/v1/sessions/"+m.sessionID+"/actions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	changed, ok := m.watchEvents().(sseChangedMsg)
+	if !ok || changed.lastEventID == 0 {
+		t.Fatalf("expected view.changed with an event id, got %#v", changed)
+	}
+	next, _ = m.Update(changed)
+	m = next.(model)
+	// Before the fix the resubscription replayed the same view.changed immediately,
+	// producing a refresh/reconnect busy loop. Now it must block waiting for new events.
+	got := make(chan tea.Msg, 1)
+	go func() { got <- m.watchEvents() }()
+	select {
+	case msg := <-got:
+		t.Fatalf("resubscribe re-delivered a consumed event: %#v", msg)
+	case <-time.After(300 * time.Millisecond):
+	}
 }

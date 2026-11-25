@@ -25,6 +25,21 @@
     "parser": {"type": "string", "maxLength": 40},
     "policy": {"type": "object"},
     "availability": {"type": "object", "additionalProperties": {"type": "string"}},
+    "capabilities": {
+      "description": "Host effects the app needs. Declaring any of them makes a runtime registration pending until it is confirmed on the device.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "network": {"type": "boolean"},
+        "devices": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^/dev/[A-Za-z0-9._/-]+$"}
+        },
+        "rf_transmit": {"type": "boolean"}
+      }
+    },
     "id": {"$ref": "#/$defs/id", "deprecated": true},
     "title": {"type": "string", "deprecated": true},
     "summary": {"type": "string", "deprecated": true},

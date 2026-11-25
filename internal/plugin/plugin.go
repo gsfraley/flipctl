@@ -48,6 +48,7 @@ type App struct {
 	Parser       string            `json:"parser,omitempty" yaml:"parser"`
 	Policy       map[string]any    `json:"policy,omitempty" yaml:"policy"`
 	Availability map[string]string `json:"availability" yaml:"availability"`
+	Capabilities Capabilities      `json:"capabilities" yaml:"capabilities"`
 }
 
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
@@ -117,6 +118,9 @@ func Validate(a App) error {
 		if strings.ContainsAny(x, ";&|$`\n") {
 			return fmt.Errorf("unsafe arg template %q", x)
 		}
+	}
+	if err := validateCapabilities(a.Capabilities); err != nil {
+		return err
 	}
 	for _, f := range a.Fields {
 		if f.ID == "" || !safeID.MatchString(f.ID) {

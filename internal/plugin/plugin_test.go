@@ -85,3 +85,43 @@ func TestParseRejectsOversizedManifest(t *testing.T) {
 		t.Fatal("oversized manifest accepted")
 	}
 }
+
+func TestCapabilitiesAreDeclaredAndValidated(t *testing.T) {
+	m := pingManifest + "capabilities:\n  network: true\n  devices: [/dev/ttyLoRa0]\n  rf_transmit: false\n"
+	a, err := Parse([]byte(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Capabilities.Network || len(a.Capabilities.Devices) != 1 || !a.Capabilities.Sensitive() {
+		t.Fatalf("capabilities not parsed: %#v", a.Capabilities)
+	}
+	for _, bad := range []string{
+		"capabilities:\n  devices: [/etc/shadow]\n",
+		"capabilities:\n  devices: [/dev/../etc/shadow]\n",
+		"capabilities:\n  agent: true\n",
+		"capabilities:\n  root: true\n",
+	} {
+		if _, err := Parse([]byte(pingManifest + bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if (Capabilities{}).Sensitive() {
+		t.Fatal("empty capabilities must not be sensitive")
+	}
+}
+
+func TestCapabilitiesCoversDetectsEscalation(t *testing.T) {
+	granted := Capabilities{Devices: []string{"/dev/ttyLoRa0"}}
+	if !granted.Covers(Capabilities{Devices: []string{"/dev/ttyLoRa0"}}) {
+		t.Fatal("same grant must be covered")
+	}
+	for _, more := range []Capabilities{{Network: true}, {RFTransmit: true}, {Agent: true}, {Devices: []string{"/dev/ttyUSB0"}}} {
+		if granted.Covers(more) {
+			t.Fatalf("escalation %v not detected", more)
+		}
+	}
+	u := granted.Union(Capabilities{Network: true, Devices: []string{"/dev/ttyLoRa0", "/dev/a"}})
+	if !u.Network || len(u.Devices) != 2 {
+		t.Fatalf("bad union %#v", u)
+	}
+}

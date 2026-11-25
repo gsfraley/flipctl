@@ -28,6 +28,7 @@ type Server struct {
 	opts          Options
 	pending       map[string]*Pending
 	cancelReasons map[string]string
+	limiter       *rateLimiter
 	mu            sync.Mutex
 	next          int
 	jobs          map[string]Job
@@ -88,7 +89,7 @@ func New(apps []plugin.App, static http.Handler) *Server {
 
 // NewWithOptions serves apps from registry, which may change at runtime.
 func NewWithOptions(registry *plugin.Registry, opts Options) *Server {
-	return &Server{registry: registry, opts: opts, pending: map[string]*Pending{}, cancelReasons: map[string]string{}, jobs: map[string]Job{}, cancels: map[string]context.CancelFunc{}, subs: map[chan Event]struct{}{}, static: opts.Static, sessionsStore: map[string]*Session{}, firstEventID: 1}
+	return &Server{registry: registry, opts: opts, limiter: newRateLimiter(opts.JobRate, opts.JobBurst), pending: map[string]*Pending{}, cancelReasons: map[string]string{}, jobs: map[string]Job{}, cancels: map[string]context.CancelFunc{}, subs: map[chan Event]struct{}{}, static: opts.Static, sessionsStore: map[string]*Session{}, firstEventID: 1}
 }
 
 // Registry exposes the live registry (for the daemon and tests).
@@ -329,6 +330,12 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	a := entry.App
 	if _, e := runner.Build(a, req.Fields); e != nil {
 		writeErr(w, 400, "validation_failed", e.Error(), "fields")
+		return
+	}
+	if ok, wait := s.limiter.allow(a.ID); !ok {
+		secs := int(wait/time.Second) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		writeErrDetails(w, http.StatusTooManyRequests, "rate_limited", fmt.Sprintf("too many jobs for %s; retry in %ds", a.ID, secs), "appId", map[string]any{"retryAfterSeconds": secs})
 		return
 	}
 	s.mu.Lock()

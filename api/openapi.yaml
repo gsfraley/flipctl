@@ -266,10 +266,196 @@ paths:
                     id: 12
                     event: view.changed
                     data: {"id":12,"type":"view.changed","sessionId":"s-1","revision":3,"time":"2026-06-22T12:00:00Z"}
+                registryChanged:
+                  value: |
+                    id: 13
+                    event: registry.changed
+                    data: {"id":13,"type":"registry.changed","registry":{"version":2,"pluginId":"field.lora-rx","change":"added","tier":"ephemeral"},"time":"2026-06-22T12:00:01Z"}
         '400': {$ref: '#/components/responses/BadRequest'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/plugins:
+    get:
+      operationId: listPlugins
+      summary: List registered plugins with their trust tier and source
+      description: |
+        Lists active and pending plugins. `tier` is `system` (the -plugins
+        catalog), `installed` (promoted) or `ephemeral` (registered at
+        runtime). `state` is `active` or `pending` (waiting for device
+        confirmation). Pass `archived=1` to include archived manifests that
+        can be restored.
+      parameters:
+        - name: archived
+          in: query
+          required: false
+          schema: {type: string, enum: ['1']}
+      responses:
+        '200':
+          description: Registry listing.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PluginList'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/plugins/{pluginId}:
+    parameters:
+      - $ref: '#/components/parameters/PluginID'
+    get:
+      operationId: getPlugin
+      summary: Get one plugin and its manifest
+      responses:
+        '200':
+          description: Plugin and the manifest it was registered with.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plugin]
+                properties:
+                  plugin: {$ref: '#/components/schemas/PluginInfo'}
+                  manifest: {type: string}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    put:
+      operationId: registerPlugin
+      summary: Register or replace an ephemeral plugin
+      description: |
+        Accepts a manifest in YAML or JSON (at most 64 KiB). It is validated
+        exactly like on-disk plugins (schemas/plugin-manifest.json plus
+        semantic checks), then against the runtime policy: executables must
+        resolve inside a command root and ViewApp run targets must be
+        registered. Only loopback clients using a local Host name may call
+        this unless the daemon runs with -allow-remote-registration, and
+        cross-origin browser requests are always refused.
+
+        A plugin whose effective capabilities are sensitive (network,
+        devices, rf_transmit, or sending data to the assistant), or a
+        replacement that escalates them, is not activated: the response is
+        202 and the registration waits for a confirmation on the device.
+        No API call can confirm it.
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema: {$ref: '../schemas/plugin-manifest.json'}
+          application/json:
+            schema: {$ref: '../schemas/plugin-manifest.json'}
+      responses:
+        '200':
+          description: Replaced an existing ephemeral plugin.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RegistrationResult'}
+        '201':
+          description: Registered and active.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RegistrationResult'}
+        '202':
+          description: Pending device confirmation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RegistrationResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '413': {$ref: '#/components/responses/BadRequest'}
+        '422': {$ref: '#/components/responses/InvalidManifest'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/RegistrationDisabled'}
+    delete:
+      operationId: removePlugin
+      summary: Remove a runtime plugin or reject a pending registration
+      description: Removing archives the manifest, cancels the plugin's running jobs and sends sessions showing it home. System plugins cannot be removed.
+      responses:
+        '200':
+          description: Removed or rejected.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pluginId, state]
+                properties:
+                  pluginId: {type: string}
+                  state: {type: string, enum: [removed, rejected]}
+                  tier: {type: string}
+                  registryVersion: {type: integer}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/RegistrationDisabled'}
+  /api/v1/plugins/{pluginId}/promote:
+    parameters:
+      - $ref: '#/components/parameters/PluginID'
+    post:
+      operationId: promotePlugin
+      summary: Request promotion of an ephemeral plugin to installed
+      description: Promotion always waits for a device confirmation.
+      responses:
+        '202':
+          description: Promotion pending device confirmation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RegistrationResult'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/RegistrationDisabled'}
+  /api/v1/plugins/{pluginId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/PluginID'
+    post:
+      operationId: restorePlugin
+      summary: Re-register an archived manifest
+      description: A restore is a fresh registration with the same validation and confirmation rules as PUT. Grants are never restored.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                ref: {type: string, description: Archive ref from the listing; defaults to the newest archived version.}
+      responses:
+        '200':
+          description: Replaced an existing ephemeral plugin.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RegistrationResult'}
+        '201':
+          description: Restored and active.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RegistrationResult'}
+        '202':
+          description: Restored as pending device confirmation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RegistrationResult'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/RegistrationDisabled'}
+  /api/v1/schema/plugin-manifest.json:
+    get:
+      operationId: getPluginManifestSchema
+      summary: Get the plugin manifest JSON Schema
+      responses:
+        '200':
+          description: The checked-in schemas/plugin-manifest.json.
+          content:
+            application/schema+json:
+              schema: {type: object}
         '500': {$ref: '#/components/responses/InternalError'}
 components:
   parameters:
+    PluginID:
+      name: pluginId
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[a-zA-Z0-9_.-]+$'}
+      example: field.lora-rx
     SessionID:
       name: id
       in: path
@@ -302,6 +488,35 @@ components:
           examples:
             internal:
               value: {error: {code: internal_error, message: unexpected error}}
+    Forbidden:
+      description: Registration refused for this client (not local, or cross-origin).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          examples:
+            remote:
+              value: {error: {code: registration_local_only, message: plugin registration is only accepted from localhost}}
+    Conflict:
+      description: The plugin id belongs to a protected tier or the request conflicts with current state.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          examples:
+            protected:
+              value: {error: {code: plugin_protected, message: 'plugin tier cannot be changed at runtime: network.ping is system'}}
+    InvalidManifest:
+      description: The manifest failed validation or the runtime policy.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          examples:
+            schema:
+              value: {error: {code: invalid_manifest, message: manifest does not match plugin-manifest schema, field: manifest}}
+    RegistrationDisabled:
+      description: The daemon runs without a state directory.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
   schemas:
     ErrorEnvelope:
       type: object
@@ -335,7 +550,7 @@ components:
       properties:
         actionId:
           type: string
-          description: Semantic ViewAction id, such as app.open, form.update, job.start, job.cancel, navigation.back, job.select, or job.run_again.
+          description: Semantic ViewAction id, such as app.open, form.update, job.start, job.cancel, navigation.back, job.select, job.run_again, view.<actionId> (ViewApp buttons), device.confirm_registration or device.reject_registration (the emulated device button; refused from other origins).
         viewId:
           type: string
           description: Caller-observed ViewDocument viewId.
@@ -367,6 +582,8 @@ components:
         id: {type: string}
         jobId: {type: string}
         appId: {type: string}
+        pluginVersion: {type: string, description: App version the job started with; replacing the app does not affect running jobs.}
+        viewAppId: {type: string, description: ViewApp whose action started the job.}
         sessionId: {type: string}
         state:
           type: string
@@ -384,7 +601,7 @@ components:
         id: {type: integer}
         type:
           type: string
-          examples: [view.changed, job.started, job.finished, events.reset]
+          examples: [view.changed, job.started, job.finished, events.reset, registry.changed]
         job:
           type: object
           additionalProperties: true
@@ -394,4 +611,78 @@ components:
         sessionId: {type: string}
         revision: {type: integer}
         reset: {type: boolean}
+        registry: {$ref: '#/components/schemas/RegistryChange'}
         time: {type: string, format: date-time}
+    RegistryChange:
+      type: object
+      required: [version, pluginId, change]
+      additionalProperties: false
+      properties:
+        version: {type: integer, description: Registry version after the change.}
+        pluginId: {type: string}
+        change: {type: string, enum: [added, replaced, removed, pending, rejected, promoted]}
+        tier: {type: string, enum: [system, installed, ephemeral]}
+    Capabilities:
+      type: object
+      additionalProperties: false
+      properties:
+        network: {type: boolean}
+        devices: {type: array, items: {type: string}}
+        rf_transmit: {type: boolean}
+        agent: {type: boolean, description: Computed; the app sends on-device data to the assistant provider.}
+    PluginInfo:
+      type: object
+      required: [id, title, kind, tier, source, state, capabilities]
+      additionalProperties: false
+      properties:
+        id: {type: string}
+        title: {type: string}
+        version: {type: string}
+        kind: {type: string, enum: [CommandApp, ViewApp]}
+        tier: {type: string, enum: [system, installed, ephemeral]}
+        source: {type: string, description: 'Where the plugin came from, e.g. catalog:plugins, api:127.0.0.1, restore:latest.'}
+        state: {type: string, enum: [active, pending]}
+        capabilities: {$ref: '#/components/schemas/Capabilities'}
+        granted: {$ref: '#/components/schemas/Capabilities'}
+        owner:
+          type: object
+          properties:
+            plugin: {type: string}
+            conversation: {type: string}
+        pending:
+          type: object
+          properties:
+            kind: {type: string, enum: [register, promote]}
+            capabilities: {$ref: '#/components/schemas/Capabilities'}
+            source: {type: string}
+            requested: {type: string, format: date-time}
+            replacesVersion: {type: string}
+        updated: {type: string, format: date-time}
+    PluginList:
+      type: object
+      required: [registryVersion, registration, sandbox, plugins]
+      properties:
+        registryVersion: {type: integer}
+        registration: {type: boolean}
+        sandbox: {type: string, enum: [bwrap, none]}
+        plugins:
+          type: array
+          items: {$ref: '#/components/schemas/PluginInfo'}
+        archived:
+          type: array
+          items:
+            type: object
+            properties:
+              ref: {type: string}
+              id: {type: string}
+              version: {type: string}
+              owner: {type: string}
+              archived: {type: string, format: date-time}
+    RegistrationResult:
+      type: object
+      required: [registryVersion, plugin]
+      additionalProperties: false
+      properties:
+        registryVersion: {type: integer}
+        plugin: {$ref: '#/components/schemas/PluginInfo'}
+        message: {type: string}

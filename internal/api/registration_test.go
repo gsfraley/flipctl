@@ -471,3 +471,26 @@ func TestEphemeralNoticeDoesNotOverclaimSandboxing(t *testing.T) {
 		t.Fatalf("notice claims sandboxing without a sandbox: %q", notice.Text)
 	}
 }
+
+func TestOpenAPIDocumentsRegistrationRoutes(t *testing.T) {
+	paths := objectAt(t, readCheckedInOpenAPI(t), "paths")
+	for path, methods := range map[string][]string{
+		"/api/v1/plugins":                     {"get"},
+		"/api/v1/plugins/{pluginId}":          {"get", "put", "delete"},
+		"/api/v1/plugins/{pluginId}/promote":  {"post"},
+		"/api/v1/plugins/{pluginId}/restore":  {"post"},
+		"/api/v1/schema/plugin-manifest.json": {"get"},
+	} {
+		for _, m := range methods {
+			if stringValue(objectValue(t, objectValue(t, paths, path), m), "operationId") == "" {
+				t.Fatalf("%s %s missing operationId", m, path)
+			}
+		}
+	}
+	put := objectValue(t, objectValue(t, paths, "/api/v1/plugins/{pluginId}"), "put")
+	for _, status := range []string{"201", "202", "403", "422"} {
+		if _, ok := objectValue(t, put, "responses")[status]; !ok {
+			t.Fatalf("PUT plugin missing %s response", status)
+		}
+	}
+}

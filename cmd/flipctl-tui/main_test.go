@@ -397,3 +397,17 @@ func TestWatchEventsAgainstDaemonDoesNotReplayConsumedViewChanged(t *testing.T) 
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+func TestViewFillsExactlyTheWindowHeight(t *testing.T) {
+	d := &viewdoc.Document{APIVersion: viewdoc.CanonicalAPIVersion, SessionID: "s-1", ViewID: "home-app-list", Revision: 1, Title: "Apps", Blocks: []viewdoc.Block{{ID: "apps", Kind: "list", Title: "Apps", Items: []viewdoc.ListItem{{Label: "Ping", Value: "network.ping"}}}}}
+	for _, h := range []int{12, 24, 48} {
+		var m tea.Model = model{base: "x", editBuffers: map[string]string{}, focus: focusDocument}
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: h})
+		m, _ = m.Update(loaded{sessionID: "s-1", viewDoc: d})
+		// A frame taller than the window scrolls the terminal and breaks
+		// Bubble Tea's incremental redraw, leaving stale rows on screen.
+		if got := len(strings.Split(m.View(), "\n")); got != h {
+			t.Fatalf("window height %d rendered %d lines", h, got)
+		}
+	}
+}

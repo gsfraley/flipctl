@@ -342,7 +342,7 @@ func (m model) View() string {
 		m.height = 36
 	}
 	if m.err != nil {
-		return fitLines([]string{truncateCell(badStyle.Render("error: "+m.err.Error()), m.width)}, m.width, m.height)
+		return frame(fitLines([]string{truncateCell(badStyle.Render("error: "+m.err.Error()), m.width)}, m.width, m.height))
 	}
 	top := dashboardLine(m, m.width)
 	notice := truncateCell("Notice: "+m.notice, m.width)
@@ -352,8 +352,15 @@ func (m model) View() string {
 	lines := []string{top, ruleLine(m.width), notice, ruleLine(m.width)}
 	lines = append(lines, padLinesPreserveSpaces(strings.Split(strings.TrimRight(body, "\n"), "\n"), m.width, bodyH)...)
 	lines = append(lines, footer)
-	return fitLines(lines, m.width, m.height)
+	return frame(fitLines(lines, m.width, m.height))
 }
+
+// frame drops fitLines' trailing newline for interactive rendering. Bubble Tea
+// counts it as one more line, so a height-line frame became height+1 lines:
+// the terminal scrolled by one row and the renderer's line diff left stale
+// rows behind whenever a view changed in place. Fixture rendering keeps the
+// trailing newline.
+func frame(s string) string { return strings.TrimSuffix(s, "\n") }
 
 func (m model) renderBody(width, height int) string {
 	docW := max(40, width-32)
